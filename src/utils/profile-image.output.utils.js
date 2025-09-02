@@ -28,7 +28,17 @@ async function genPng(data, options) {
   const canvas = createCanvas(885, 303);
   const ctx = canvas.getContext('2d');
 
-  const userAvatar = (assets.avatarURL ?? assets.defaultAvatarURL) + '?size=512';
+  // Use real Discord avatar URL if available, otherwise use default
+  let userAvatar = assets.avatarURL;
+  if (!userAvatar && assets.defaultAvatarURL) {
+    userAvatar = assets.defaultAvatarURL;
+  }
+  
+  // Ensure avatar URL has proper size parameter
+  if (userAvatar && userAvatar.startsWith('http')) {
+    userAvatar = userAvatar.includes('?') ? userAvatar + '&size=512' : userAvatar + '?size=512';
+  }
+  
   const userBanner = assets.bannerURL ? assets.bannerURL + '?size=512' : null;
   const badges = await getBadges(data, options);
 
