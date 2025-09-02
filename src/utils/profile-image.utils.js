@@ -1,4 +1,5 @@
 const { createCanvas, loadImage } = require('@napi-rs/canvas');
+const { createBadgeCanvas, getBadgeInfo } = require('./local-badges.utils');
 
 const {
   otherImgs,
@@ -26,38 +27,25 @@ const clydeID = '1081004946872352958';
 async function getBadges(data, options) {
   const { assets } = data;
 
-  const badges = assets?.badges || [];
   const canvasBadges = [];
 
-  for (const badge of badges.reverse()) {
-    const { name, icon } = badge;
-    const canvas = await loadImage(icon).catch(() => {});
-    if (!canvas) {
-      throw new DiscordArtsError(
-        `Could not load badge: (${name})\nIf you think it is not a network problem, please report it in our discord: https://discord.gg/csedxqGQKP`
-      );
-    }
-
-    canvasBadges.push({ canvas, x: 0, y: 15, w: 60 });
-  }
-
+  // Only use custom badges from options, ignore any external badges
   if (options?.customBadges?.length) {
-    if (options?.overwriteBadges) {
-      canvasBadges.splice(0, badges.length);
-    }
-
     for (let i = 0; i < options.customBadges.length; i++) {
-      const canvas = await loadImage(parsePng(options.customBadges[i])).catch(
-        () => {}
-      );
-      if (!canvas) {
-        const truncatedBadge = truncateText(options.customBadges[i], 30);
-        throw new DiscordArtsError(
-          `Could not load custom badge: (${truncatedBadge}), make sure that the image exists.`
+      try {
+        const canvas = await loadImage(parsePng(options.customBadges[i])).catch(
+          () => null
         );
+        if (!canvas) {
+          const truncatedBadge = truncateText(options.customBadges[i], 30);
+          console.warn(`Could not load custom badge: ${truncatedBadge}, skipping`);
+          continue; // Skip this badge instead of using fallback
+        }
+        canvasBadges.push({ canvas, x: 10, y: 22, w: 46 });
+      } catch (error) {
+        console.warn(`Error loading custom badge: ${error.message}, skipping`);
+        continue; // Skip this badge
       }
-
-      canvasBadges.push({ canvas, x: 10, y: 22, w: 46 });
     }
   }
 
@@ -257,7 +245,23 @@ async function genTextAndAvatar(data, options, avatarData) {
   ctx.fillStyle = '#dadada';
   ctx.fillText(createdDateString, 775, 273);
 
-  const cardAvatar = await loadImage(avatarData);
+  // Load real Discord avatar or use fallback
+  let cardAvatar;
+  try {
+    if (avatarData && avatarData.startsWith('http')) {
+      // Load real Discord avatar
+      cardAvatar = await loadImage(avatarData);
+    } else if (data.assets?.avatarURL && data.assets.avatarURL.startsWith('http')) {
+      // Try to load from avatarURL
+      cardAvatar = await loadImage(data.assets.avatarURL);
+    } else {
+      // Generate fallback avatar with user initials
+      cardAvatar = await generateFallbackAvatar(username || rawUsername, id);
+    }
+  } catch (error) {
+    console.warn('Could not load Discord avatar, using fallback:', error.message);
+    cardAvatar = await generateFallbackAvatar(username || rawUsername, id);
+  }
 
   const roundValue = options?.squareAvatar ? 30 : 225;
 
@@ -278,6 +282,37 @@ async function genTextAndAvatar(data, options, avatarData) {
     canvas = await genStatus(canvas, options);
   }
 
+  return canvas;
+}
+
+// Generate a better fallback avatar with user initials
+async function generateFallbackAvatar(username, userId) {
+  const canvas = createCanvas(512, 512);
+  const ctx = canvas.getContext('2d');
+  
+  // Use Discord's default avatar colors
+  const defaultAvatarColors = [
+    '#faa61a', '#f04747', '#747f8d', '#43b581', '#faa61a',
+    '#f04747', '#747f8d', '#43b581', '#faa61a', '#f04747'
+  ];
+  
+  const colorIndex = parseInt(userId.slice(-1), 16) % defaultAvatarColors.length;
+  const color = defaultAvatarColors[colorIndex];
+  
+  // Background circle
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(256, 256, 256, 0, 2 * Math.PI);
+  ctx.fill();
+  
+  // Add user initials (first letter of username)
+  const initial = username ? username.charAt(0).toUpperCase() : 'U';
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 300px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(initial, 256, 256);
+  
   return canvas;
 }
 
